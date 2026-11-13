@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - name: Create reproducible tarball and checksum
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          name="requestlab-${TAG}"
+          mkdir -p out
+          files="dist package.json"
+          for f in README.md LICENSE CHANGELOG.md; do
+            if [ -f "$f" ]; then
+              files="$files $f"
+            else
+              echo "::warning::$f not found, not included in tarball"
+            fi
+          done
+          # Fixed mtime/ownership/order and no gzip timestamp => reproducible.
+          mtime=$(git log -1 --format=%cI)
+          # shellcheck disable=SC2086
+          tar --sort=name --mtime="$mtime" --owner=0 --group=0 \
+            --numeric-owner --transform "s,^,${name}/," \
+            -cf - $files | gzip -n -9 > "out/${name}.tar.gz"
+          (cd out && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          cat "out/${name}.tar.gz.sha256"
+      - name: Check the packaged artefact in a clean directory
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          name="requestlab-${TAG}"
+          work=$(mktemp -d)
+          tar -xzf "out/${name}.tar.gz" -C "$work"
+          node "$work/${name}/dist/bin/requestlab.js" --version
+          node "$work/${name}/dist/bin/requestlab.js" --help > /dev/null
+          rm -rf "$work"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: out/
+          if-no-files-found: error
+
+  release:
+    name: github release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: out
+      - name: Verify checksum
+        run: cd out && sha256sum -c ./*.sha256
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" out/* \
+            --repo "$REPO" --title "RequestLab $TAG" \
+            --notes-file .github/release-notes/"$TAG".md --verify-tag

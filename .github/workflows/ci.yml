@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.19', '22', '24']
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test the build
+        run: |
+          node dist/bin/requestlab.js --version
+          node dist/bin/requestlab.js --help > /dev/null
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=low
+
+      - name: Audit all dependencies
+        run: npm audit --audit-level=high
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The official action infers a base and head from the event, which has
+      # no meaning for the first push to a repository (the "before" commit is
+      # all zeroes) and makes it fail for a reason unrelated to secrets. The
+      # pinned container scans the whole history directly, which is both the
+      # behaviour wanted here and the same on every event type.
+      - name: Scan full history for verified secrets
+        run: |
+          set -eu
+          docker run --rm -v "$PWD:/repo:ro" \
+            ghcr.io/trufflesecurity/trufflehog:3.90.8 \
+            git file:///repo --results=verified --fail --no-update
