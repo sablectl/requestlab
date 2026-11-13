@@ -78,7 +78,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github/release-notes
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-files
           path: out
