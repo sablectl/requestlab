@@ -74,6 +74,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/release-notes
       - uses: actions/download-artifact@v4
         with:
           name: release-files
