@@ -4,6 +4,23 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- Every header the project classifies as a credential, not only
+  `Authorization`, `Cookie` and `Proxy-Authorization`, is now dropped on a
+  cross-origin redirect. Custom credential headers such as `X-Api-Key` were
+  previously forwarded to the new origin.
+- Userinfo present in a `Location` header is cleared on a cross-origin
+  redirect.
+- A rejected URL is redacted before it appears in the error message, so
+  userinfo and credential-shaped query parameters are no longer printed.
+- Human-readable output now escapes C0 and C1 control characters, DEL and the
+  Unicode bidirectional overrides. Status text, header names and values, URLs
+  and body previews are remote-controlled and could previously rewrite lines
+  already printed to the terminal. JSON output is unchanged.
+
 ## [1.0.0] — 2026-11-13
 
 First release.
