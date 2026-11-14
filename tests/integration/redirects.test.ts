@@ -167,6 +167,8 @@ describe('credentials across a redirect', () => {
         'Authorization: Bearer cross-origin-token',
         '--header',
         'Cookie: session=secret',
+        '--header',
+        'X-Api-Key: cross-origin-api-key',
         '--quiet',
       ],
       { env: workspace.env },
@@ -176,6 +178,8 @@ describe('credentials across a redirect', () => {
     expect(landed?.url).toBe('/landing');
     expect(landed?.headers['authorization']).toBeUndefined();
     expect(landed?.headers['cookie']).toBeUndefined();
+    expect(landed?.headers['x-api-key']).toBeUndefined();
     expect(result.stdout).not.toContain('cross-origin-token');
+    expect(result.stdout).not.toContain('cross-origin-api-key');
   });
 });

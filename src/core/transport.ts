@@ -29,6 +29,12 @@ import {
   createGuardedLookup,
 } from './destination.js';
 import { AppError } from './errors.js';
+import {
+  isSensitiveHeader,
+  isSensitiveParam,
+  REDACTED,
+  redactUrl,
+} from './redact.js';
 import type {
   Exchange,
   HeaderPair,
@@ -327,6 +333,31 @@ function looksTextual(headers: readonly HeaderPair[]): boolean {
   );
 }
 
+/**
+ * A rejected URL is still printed back to the user, so it is redacted first.
+ * When it cannot be parsed at all, `redactUrl` returns it unchanged and the
+ * credentials are removed textually instead.
+ */
+function redactForMessage(input: string): string {
+  const redacted = redactUrl(input);
+  if (redacted !== input) return redacted;
+  const at = input.lastIndexOf('@');
+  const withoutUserinfo = at === -1 ? input : input.slice(at + 1);
+  const mark = withoutUserinfo.indexOf('?');
+  if (mark === -1) return withoutUserinfo;
+  const query = withoutUserinfo
+    .slice(mark + 1)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq === -1) return pair;
+      const name = pair.slice(0, eq);
+      return isSensitiveParam(name) ? `${name}=${REDACTED}` : pair;
+    })
+    .join('&');
+  return `${withoutUserinfo.slice(0, mark)}?${query}`;
+}
+
 export function parseRequestUrl(input: string): URL {
   let url: URL;
   try {
@@ -334,7 +365,7 @@ export function parseRequestUrl(input: string): URL {
   } catch {
     throw new AppError(
       'invalid-url',
-      `"${input}" is not a valid absolute URL.`,
+      `"${redactForMessage(input)}" is not a valid absolute URL.`,
       'Include the scheme, for example https://example.com/path.',
     );
   }
@@ -433,12 +464,9 @@ export async function send(
         if (rewritten.dropBody) body = null;
         // Credentials are not carried to another origin.
         if (next.host !== url.host || next.protocol !== url.protocol) {
-          headers = headers.filter(
-            (h) =>
-              !['authorization', 'cookie', 'proxy-authorization'].includes(
-                h.name.toLowerCase(),
-              ),
-          );
+          headers = headers.filter((h) => !isSensitiveHeader(h.name));
+          next.username = '';
+          next.password = '';
         }
         if (body === null) {
           headers = headers.filter(
