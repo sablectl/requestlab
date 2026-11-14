@@ -5,6 +5,7 @@ import { compareExchanges } from '../../../src/core/compare.js';
 import type { HistoryEntry } from '../../../src/core/history.js';
 import { REDACTED } from '../../../src/core/redact.js';
 import { createPainter } from '../../../src/output/colour.js';
+import { escapeControlCharacters } from '../../../src/output/escape.js';
 import {
   formatBytes,
   formatComparison,
@@ -316,5 +317,58 @@ describe('formatHistory', () => {
     expect(output).toContain('failed  GET https://example.com/');
     expect(output).toContain('    The connection failed.');
     expect(output).toContain('2 entries.');
+  });
+});
+
+describe('terminal escaping', () => {
+  const hostile = 'ok\u001b[2K\rHTTP/1.1 200 OK';
+
+  it('neutralises control characters and bidi overrides', () => {
+    expect(escapeControlCharacters(hostile)).not.toContain('\u001b');
+    expect(escapeControlCharacters(hostile)).not.toContain('\r');
+    expect(escapeControlCharacters(hostile)).toContain('\\x1b');
+    expect(escapeControlCharacters('report\u202Egnp.exe')).toContain('\\u202e');
+    expect(escapeControlCharacters('日本語 — ümlaut')).toBe('日本語 — ümlaut');
+  });
+
+  it('escapes a hostile status text and header pair', () => {
+    const output = formatSend(
+      makeExchange({
+        final: {
+          statusText: hostile,
+          headers: [{ name: `X-Evil\u001b[2K`, value: `v\u202E\u001b[31m` }],
+        },
+      }),
+      paint,
+      ALL,
+    );
+
+    expect(output).not.toContain('\u001b');
+    expect(output).not.toContain('\r');
+    expect(output).not.toContain('\u202E');
+    expect(output).toContain('\\x1b[2K');
+    expect(output).toContain('\\u202e');
+  });
+
+  it('escapes a hostile body preview', () => {
+    const output = formatSend(
+      makeExchange({ body: { preview: hostile } }),
+      paint,
+      ALL,
+    );
+    expect(output).not.toContain('\u001b');
+    expect(output).toContain('\\x1b[2K\\x0dHTTP/1.1 200 OK');
+  });
+
+  it('leaves our own colour codes intact', () => {
+    const coloured = createPainter(true);
+    const output = formatSend(
+      makeExchange({ final: { statusText: hostile } }),
+      coloured,
+      NONE,
+    );
+
+    expect(output).toContain('\u001b[32m');
+    expect(output).toContain('\\x1b[2K');
   });
 });

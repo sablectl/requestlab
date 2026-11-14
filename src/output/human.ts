@@ -8,6 +8,19 @@ import type { HistoryEntry } from '../core/history.js';
 import { redactHeaders, redactText, redactUrl } from '../core/redact.js';
 import type { Exchange, HeaderPair } from '../core/types.js';
 import type { Painter, Style } from './colour.js';
+import { escapeControlCharacters } from './escape.js';
+
+// Everything a server sends back is untrusted text, so it is escaped on the
+// way out through `safe` and `safeUrl`. Escaping happens before `paint` is
+// applied, which leaves our own colour codes intact.
+
+function safe(text: string): string {
+  return escapeControlCharacters(text);
+}
+
+function safeUrl(url: string): string {
+  return safe(redactUrl(url));
+}
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -36,7 +49,7 @@ function statusStyle(status: number): Style {
 function statusLine(exchange: Exchange, paint: Painter): string {
   const { status, statusText, httpVersion } = exchange.final;
   const text = `HTTP/${httpVersion} ${status}${
-    statusText === '' ? '' : ` ${statusText}`
+    statusText === '' ? '' : ` ${safe(statusText)}`
   }`;
   return paint(text, statusStyle(status));
 }
@@ -47,12 +60,12 @@ function headerBlock(
   indent = '  ',
 ): string[] {
   return redactHeaders(headers).map(
-    ({ name, value }) => `${indent}${paint(name, 'dim')}: ${value}`,
+    ({ name, value }) => `${indent}${paint(safe(name), 'dim')}: ${safe(value)}`,
   );
 }
 
 function field(label: string, value: string, paint: Painter): string {
-  return `  ${paint(label.padEnd(15), 'dim')} ${value}`;
+  return `  ${paint(label.padEnd(15), 'dim')} ${safe(value)}`;
 }
 
 export interface ReportOptions {
@@ -74,7 +87,7 @@ export function formatSend(
     lines.push(
       field(
         'Method',
-        `${exchange.request.method} ${redactUrl(exchange.request.url)}`,
+        `${exchange.request.method} ${safeUrl(exchange.request.url)}`,
         paint,
       ),
     );
@@ -90,8 +103,8 @@ export function formatSend(
     lines.push('', paint('Redirects', 'bold'));
     for (const hop of exchange.redirects) {
       lines.push(
-        `  ${hop.status} ${redactUrl(hop.url)} → ${
-          hop.location === null ? '(none)' : redactUrl(hop.location)
+        `  ${hop.status} ${safeUrl(hop.url)} → ${
+          hop.location === null ? '(none)' : safeUrl(hop.location)
         }`,
       );
     }
@@ -112,7 +125,7 @@ export function formatSend(
 
   if (options.showBody && exchange.body.preview !== null) {
     lines.push('', paint('Body', 'bold'));
-    lines.push(redactText(exchange.body.preview));
+    lines.push(safe(redactText(exchange.body.preview)));
     if (exchange.body.previewTruncated) {
       lines.push(
         paint('  … preview truncated. Use --preview to show more.', 'dim'),
@@ -155,11 +168,11 @@ export function formatInspect(exchange: Exchange, paint: Painter): string {
     lines.push('', paint('Redirect chain', 'bold'));
     exchange.redirects.forEach((hop, index) => {
       lines.push(
-        `  ${index + 1}. ${hop.status} ${hop.method} ${redactUrl(hop.url)}`,
+        `  ${index + 1}. ${hop.status} ${hop.method} ${safeUrl(hop.url)}`,
       );
       lines.push(
         `     → ${
-          hop.location === null ? '(none)' : redactUrl(hop.location)
+          hop.location === null ? '(none)' : safeUrl(hop.location)
         } in ${formatMs(hop.headersMs)}`,
       );
     });
@@ -286,9 +299,9 @@ export function formatComparison(
       ),
     );
     for (const difference of comparison.differences) {
-      lines.push(`  ${paint(difference.field, 'bold')}`);
-      lines.push(`    left   ${difference.left}`);
-      lines.push(`    right  ${difference.right}`);
+      lines.push(`  ${paint(safe(difference.field), 'bold')}`);
+      lines.push(`    left   ${safe(difference.left)}`);
+      lines.push(`    right  ${safe(difference.right)}`);
     }
   }
 
@@ -315,7 +328,10 @@ export function formatComparison(
   if (comparison.ignoredHeaders.length > 0) {
     lines.push(
       '',
-      paint(`Ignored headers: ${comparison.ignoredHeaders.join(', ')}`, 'dim'),
+      paint(
+        `Ignored headers: ${safe(comparison.ignoredHeaders.join(', '))}`,
+        'dim',
+      ),
     );
   }
 
@@ -334,9 +350,11 @@ export function formatHistory(
         ? paint('failed', 'red')
         : paint(String(entry.status), statusStyle(entry.status));
     lines.push(
-      `${paint(entry.at, 'dim')}  ${status}  ${entry.method} ${entry.url}`,
+      `${paint(safe(entry.at), 'dim')}  ${status}  ${safe(entry.method)} ${safe(
+        entry.url,
+      )}`,
     );
-    if (entry.error !== null) lines.push(`    ${entry.error}`);
+    if (entry.error !== null) lines.push(`    ${safe(entry.error)}`);
   }
   lines.push('');
   lines.push(`${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}.`);
